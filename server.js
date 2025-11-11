@@ -1,53 +1,111 @@
-// server.js
-const express = require('express');
-const cors = require('cors');
-const path = require('path');
+const express = require("express");
+const mysql = require("mysql");
+const cors = require("cors");
 
 const app = express();
-const PORT = 5000;
+const port = 3000;
 
 app.use(cors());
-app.use(express.json());
 
-// Serve static files dari folder "public"
-app.use(express.static(path.join(__dirname, 'public')));
-
-// Endpoint JSON sesuai format HTML-mu
-app.get('/api/data', (req, res) => {
-  const data = {
-    suhumax: 36,
-    suhumin: 21,
-    suhurata: 28.35,
-    nilai_suhu_max_humid_max: [
-      {
-        idx: 101,
-        suhun: 36,
-        humid: 36,
-        kecerahan: 25,
-        timestamp: "2010-09-18 07:23:48"
-      },
-      {
-        idx: 226,
-        suhun: 36,
-        humid: 36,
-        kecerahan: 27,
-        timestamp: "2011-05-02 12:29:34"
-      }
-    ],
-    month_year_max: [
-      { month_year: "9-2010" },
-      { month_year: "5-2011" }
-    ]
-  };
-
-  res.json(data);
+// 🔧 Konfigurasi koneksi database
+const db = mysql.createConnection({
+  host: "localhost",
+  user: "root",
+  password: "",
+  database: "hidroponik_iot",
 });
 
-// fallback: bila buka / maka serve index.html dari public
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+// 🔌 Koneksi ke database
+db.connect((err) => {
+  if (err) {
+    console.error("❌ Koneksi database gagal:", err);
+  } else {
+    console.log("✅ Terhubung ke MySQL (database: hidroponik_iot)");
+  }
 });
 
-app.listen(PORT, () => {
-  console.log(`Server berjalan di http://localhost:${PORT}`);
+// 📊 Endpoint: Ambil 10 data sensor terakhir + suhu max/min/rata2
+app.get("/api/sensor", (req, res) => {
+  const sql = `
+    SELECT 
+      id,
+      suhu,
+      humidity AS kelembapan,
+      lux AS kecerahan,
+      timestamp
+    FROM data_sensor
+    ORDER BY id DESC 
+    LIMIT 10
+  `;
+
+  db.query(sql, (err, result) => {
+    if (err) {
+      console.error("❌ Query error:", err);
+      return res.status(500).json({ status: "error", message: "Gagal mengambil data sensor" });
+    }
+
+    // Hitung suhu max, min, rata-rata
+    if (result.length > 0) {
+      const suhuValues = result.map((row) => row.suhu);
+      const suhuMax = Math.max(...suhuValues);
+      const suhuMin = Math.min(...suhuValues);
+      const suhuAvg = (
+        suhuValues.reduce((a, b) => a + b, 0) / suhuValues.length
+      ).toFixed(2);
+
+      return res.json({
+        status: "success",
+        data: result,
+        statistik: {
+          suhuMax,
+          suhuMin,
+          suhuAvg,
+        },
+      });
+    } else {
+      return res.json({
+        status: "success",
+        data: [],
+        statistik: null,
+      });
+    }
+  });
+});
+
+// 🌡️ Endpoint: Ambil data sensor terbaru (1 record terakhir)
+app.get("/api/sensor/latest", (req, res) => {
+  const sql = `
+    SELECT 
+      id,
+      suhu,
+      humidity AS kelembapan,
+      lux AS kecerahan,
+      timestamp
+    FROM data_sensor
+    ORDER BY id DESC 
+    LIMIT 1
+  `;
+  db.query(sql, (err, result) => {
+    if (err) {
+      console.error("❌ Query error:", err);
+      return res.status(500).json({ status: "error", message: "Gagal mengambil data terbaru" });
+    }
+
+    if (result.length > 0) {
+      res.json({
+        status: "success",
+        data: result[0],
+      });
+    } else {
+      res.json({
+        status: "success",
+        data: null,
+      });
+    }
+  });
+});
+
+// 🚀 Jalankan server
+app.listen(port, () => {
+  console.log(`🚀 Server berjalan di http://localhost:${port}`);
 });
